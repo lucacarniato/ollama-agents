@@ -3,7 +3,7 @@ import os
 from io import BytesIO
 
 from docx import Document
-from reflection_agent import AppState, build_agent
+from reflection_agent import AppState, APP
 
 def parse_cv_file(cv_file):
     """
@@ -17,8 +17,6 @@ def parse_cv_file(cv_file):
     if cv_file is None:
         return None, None
 
-    # Gradio File usually returns a NamedString with .name = temp path
-    # but handle str just in case.
     path = getattr(cv_file, "name", cv_file)
     filename = os.path.basename(path).lower()
 
@@ -57,7 +55,7 @@ def build_docx_from_text(text: str, filename: str = "document.docx") -> BytesIO:
     return bio
 
 
-def run_langgraph_agent(agent, user_input: dict):
+def run_langgraph_agent(user_input: dict):
     """
     Plug your LangGraph reflection workflow here.
 
@@ -69,13 +67,13 @@ def run_langgraph_agent(agent, user_input: dict):
     """
 
     initial_state = AppState.from_user_input(user_input)
-    final_state = agent.invoke(initial_state)
+    final_state = APP.invoke(initial_state)
     return (
         final_state.get("cover_letter_final") or final_state.get("cover_letter_draft", ""),
         final_state.get("cv_final") or final_state.get("cv_draft", "")
     )
 
-def process_submission(agent, job_description, cv_file):
+def process_submission(job_description, cv_file):
     """
     Called when user clicks SUBMIT.
     - Validates inputs
@@ -117,7 +115,7 @@ def process_submission(agent, job_description, cv_file):
     }
 
     # Call your LangGraph reflection agent here
-    cover_letter_text, improved_cv_text = run_langgraph_agent(agent, user_input)
+    cover_letter_text, improved_cv_text = run_langgraph_agent(user_input)
 
     # Build downloadable cover letter (.docx)
     cl_docx = build_docx_from_text(
@@ -140,7 +138,7 @@ def process_submission(agent, job_description, cv_file):
     return cover_letter_text, cl_docx, refined_cv
 
 def main():
-    agent = build_agent()
+
     with gr.Blocks() as demo:
         gr.Markdown("# Job Application Assistant")
 
@@ -185,13 +183,11 @@ def main():
         # Wire submit -> processing + outputs
         submit_btn.click(
             fn=process_submission,
-            inputs=[agent, job_desc, cv_upload],
+            inputs=[job_desc, cv_upload],
             outputs=[cover_letter_box, download_cl_btn, download_cv_btn],
         )
 
     demo.launch()
-
-# this job requires experience in C++ and cmake
 
 if __name__ == "__main__":
     main()
