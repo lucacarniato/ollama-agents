@@ -140,7 +140,7 @@ def build_agent():
         return "reflect_cover_letter"  # loop again through CL + CV improvements
 
 
-    llm = ChatOllama(model="llama3.2",
+    llm = ChatOllama(model="phi3",
                      temperature=0.7)
 
     graph = StateGraph(AppState)

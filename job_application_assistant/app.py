@@ -1,112 +1,88 @@
 import gradio as gr
 import os
-from io import BytesIO
+import tempfile
 
 from docx import Document
 from reflection_agent import AppState, APP
 
+def build_docx_file(text: str, filename: str) -> str:
+    """
+    Build a .docx file on disk and return its path.
+    """
+    tmp_dir = tempfile.mkdtemp()
+    path = os.path.join(tmp_dir, filename)
+    doc = Document()
+    for line in text.splitlines():
+        doc.add_paragraph(line)
+    doc.save(path)
+    return path
+
+
+def build_tex_file(text: str, filename: str) -> str:
+    """
+    Build a .tex file on disk and return its path.
+    """
+    tmp_dir = tempfile.mkdtemp()
+    path = os.path.join(tmp_dir, filename)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
 def parse_cv_file(cv_file):
     """
     Parse CV content from a Gradio File input.
-    Supports:
-      - .docx
-      - .tex
-    Accepts both NamedString (filepath wrapper) and plain str paths.
-    Returns: (meta, text) or (None, None) on unsupported format.
+    Supports .docx and .tex.
     """
     if cv_file is None:
         return None, None
 
     path = getattr(cv_file, "name", cv_file)
-    filename = os.path.basename(path).lower()
+    filename = os.path.basename(path)
 
-    if filename.endswith(".docx"):
-        # python-docx can take the path directly
+    if filename.lower().endswith(".docx"):
         doc = Document(path)
         text = "\n".join(p.text for p in doc.paragraphs)
         fmt = "docx"
-
-    elif filename.endswith(".tex"):
+    elif filename.lower().endswith(".tex"):
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
         fmt = "tex"
-
     else:
         return None, None
 
-    meta = {
-        "format": fmt,
-        "filename": os.path.basename(path),
-    }
+    meta = {"format": fmt, "filename": filename}
     return meta, text
 
-
-def build_docx_from_text(text: str, filename: str = "document.docx") -> BytesIO:
-    """
-    Build an in-memory .docx file from plain text.
-    """
-    doc = Document()
-    for line in text.splitlines():
-        doc.add_paragraph(line)
-    bio = BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-    bio.name = filename
-    return bio
-
+# ---------- LangGraph hook (you already have app built) ----------
 
 def run_langgraph_agent(user_input: dict):
-    """
-    Plug your LangGraph reflection workflow here.
-
-    Expected to return:
-        cover_letter_text (str)
-        improved_cv_text (str)
-
-    For now this is a placeholder.
-    """
-
     initial_state = AppState.from_user_input(user_input)
     final_state = APP.invoke(initial_state)
-    return (
-        final_state.get("cover_letter_final") or final_state.get("cover_letter_draft", ""),
-        final_state.get("cv_final") or final_state.get("cv_draft", "")
+
+    cover_letter_text = (
+        final_state.get("cover_letter_final")
+        or final_state.get("cover_letter_draft", "")
     )
+    improved_cv_text = (
+        final_state.get("cv_final")
+        or final_state.get("cv_draft", "")
+    )
+    return cover_letter_text, improved_cv_text
+
+# ---------- Main Gradio handler ----------
 
 def process_submission(job_description, cv_file):
-    """
-    Called when user clicks SUBMIT.
-    - Validates inputs
-    - Parses CV
-    - Runs LangGraph agent (stub here)
-    - Returns:
-        - Cover letter textbox content
-        - Downloadable cover letter .docx
-        - Downloadable improved CV (.docx or .tex)
-    """
     if not job_description:
-        return (
-            "Please paste the job description.",
-            None,
-            None,
-        )
+        return "Please paste the job description.", None, None
 
     if cv_file is None:
-        return (
-            "Please upload your CV in .docx or .tex format.",
-            None,
-            None,
-        )
+        return "Please upload your CV in .docx or .tex format.", None, None
 
     meta, cv_text = parse_cv_file(cv_file)
     if meta is None:
-        return (
-            "Unsupported CV format. Please upload a .docx or .tex file.",
-            None,
-            None,
-        )
+        return "Unsupported CV format. Please upload a .docx or .tex file.", None, None
 
-    # This is the structured "user input" for the agent
     user_input = {
         "job_description": job_description,
         "cv_text": cv_text,
@@ -114,28 +90,26 @@ def process_submission(job_description, cv_file):
         "cv_filename": meta["filename"],
     }
 
-    # Call your LangGraph reflection agent here
+    # call your compiled LangGraph app
     cover_letter_text, improved_cv_text = run_langgraph_agent(user_input)
 
-    # Build downloadable cover letter (.docx)
-    cl_docx = build_docx_from_text(
+    # Build downloadable files (MUST be paths for DownloadButton)
+    cover_letter_path = build_docx_file(
         cover_letter_text,
         filename="cover_letter.docx"
     )
 
-    # Build downloadable refined CV in original format
-    if meta["format"] == "docx":
-        refined_cv = build_docx_from_text(
+    if meta["format"].lower() == "docx":
+        refined_cv_path = build_docx_file(
             improved_cv_text,
-            filename=meta["filename"]  # preserve original name
+            filename=meta["filename"],
         )
-    else:  # .tex
-        bio = BytesIO(improved_cv_text.encode("utf-8"))
-        bio.seek(0)
-        bio.name = meta["filename"]
-        refined_cv = bio
-
-    return cover_letter_text, cl_docx, refined_cv
+    else:  # "tex"
+        refined_cv_path = build_tex_file(
+            improved_cv_text,
+            filename=meta["filename"],
+        )
+    return cover_letter_text, cover_letter_path, refined_cv_path
 
 def main():
 
