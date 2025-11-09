@@ -13,6 +13,7 @@ memory = None
 search = None
 search_tool = None
 tools = None
+agent = None
 
 def chat_interface(user_input, chat_history):
     """
