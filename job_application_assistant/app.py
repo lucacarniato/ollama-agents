@@ -3,7 +3,7 @@ import os
 import tempfile
 
 from docx import Document
-from reflection_agent import AppState, APP
+from reflection_agent import AppState, AGENT
 
 def build_docx_file(text: str, filename: str) -> str:
     """
@@ -54,11 +54,9 @@ def parse_cv_file(cv_file):
     meta = {"format": fmt, "filename": filename}
     return meta, text
 
-# ---------- LangGraph hook (you already have app built) ----------
-
 def run_langgraph_agent(user_input: dict):
     initial_state = AppState.from_user_input(user_input)
-    final_state = APP.invoke(initial_state)
+    final_state = AGENT.invoke(initial_state)
 
     cover_letter_text = (
         final_state.get("cover_letter_final")
@@ -69,8 +67,6 @@ def run_langgraph_agent(user_input: dict):
         or final_state.get("cv_draft", "")
     )
     return cover_letter_text, improved_cv_text
-
-# ---------- Main Gradio handler ----------
 
 def process_submission(job_description, cv_file):
     if not job_description:
@@ -90,10 +86,10 @@ def process_submission(job_description, cv_file):
         "cv_filename": meta["filename"],
     }
 
-    # call your compiled LangGraph app
+    # call compiled LangGraph app
     cover_letter_text, improved_cv_text = run_langgraph_agent(user_input)
 
-    # Build downloadable files (MUST be paths for DownloadButton)
+    # Build downloadable files
     cover_letter_path = build_docx_file(
         cover_letter_text,
         filename="cover_letter.docx"

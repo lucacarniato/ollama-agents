@@ -36,112 +36,161 @@ class AppState(TypedDict):
 def build_agent():
 
     def init_cv_and_cl(state: AppState) -> AppState:
-        """Initial drafts conditioned on JD + CV."""
         jd = state["job_description"]
         cv = state["cv_text"]
 
-        cl_prompt = f"""
+        cl_prompt = """
         Using the CV and job description, write a concise, tailored cover letter.
-        Focus on the most relevant experiences and quantify impact.
+        Focus heavily on the most relevant experience and concrete achievements.
+        Keep it truthful and under 1 page.
         """
-        cv_prompt = f"""
+        cv_prompt = """
         Rewrite the CV content to better match this job description.
-        Keep truthful, highlight the most relevant roles, skills, and results.
+        - Reorder experiences by relevance.
+        - Strengthen bullets with metrics when plausible.
+        - Do NOT invent skills or roles.
+        Output full CV text.
         """
 
-        cl = llm.invoke([HumanMessage(content=cl_prompt + "\n\nJOB:\n" + jd + "\n\nCV:\n" + cv)]).content
-        cv_new = llm.invoke([HumanMessage(content=cv_prompt + "\n\nJOB:\n" + jd + "\n\nCV:\n" + cv)]).content
+        cl = draft_llm.invoke([
+            HumanMessage(content=cl_prompt + "\n\nJOB:\n" + jd + "\n\nCV:\n" + cv)
+        ]).content
+
+        cv_new = draft_llm.invoke([
+            HumanMessage(content=cv_prompt + "\n\nJOB:\n" + jd + "\n\nCV:\n" + cv)
+        ]).content
 
         state["cover_letter_draft"] = cl
         state["cv_draft"] = cv_new
         state["iteration"] = 0
         return state
 
+    # 2) Reviewer for cover letter using stronger reasoning model
     def reflect_cover_letter(state: AppState) -> AppState:
-        """Critic/reflector for cover letter."""
+        jd = state["job_description"]
+        cv = state["cv_text"]
+        cl = state["cover_letter_draft"]
+
         review_prompt = """
-        Review the cover letter against the job description and CV.
-        List concrete, bullet-point suggestions to:
-        - Improve relevance
-        - Improve clarity/impact
-        - Remove repetition
-        - Keep length reasonable (max 1 page)
+        You are a critical reviewer.
+        Assess the cover letter vs the job description and CV.
+
+        Provide bullet-point feedback on:
+        - Relevance to key requirements
+        - Clarity & structure
+        - Evidence / metrics
+        - Tone & conciseness
+
+        Be specific and actionable.
         """
-        feedback = llm.invoke([
-            HumanMessage(content=review_prompt +
-                                 "\n\nJOB:\n" + state["job_description"] +
-                                 "\n\nCV:\n" + state["cv_text"] +
-                                 "\n\nCOVER LETTER:\n" + state["cover_letter_draft"])
+        fb = revise_llm.invoke([
+            HumanMessage(
+                content=review_prompt
+                + "\n\nJOB:\n" + jd
+                + "\n\nCV:\n" + cv
+                + "\n\nCOVER LETTER:\n" + cl
+            )
         ]).content
-        state["cover_letter_feedback"] = feedback
+
+        state["cover_letter_feedback"] = fb
         return state
 
     def revise_cover_letter(state: AppState) -> AppState:
-        """Apply feedback to get improved cover letter."""
-        prompt = """
-        Apply the reviewer feedback to rewrite the cover letter.
-        Output only the final improved letter.
+        jd = state["job_description"]
+        cv = state["cv_text"]
+        cl = state["cover_letter_draft"]
+        fb = state["cover_letter_feedback"]
+
+        revise_prompt = """
+        Rewrite the cover letter applying the feedback.
+        Constraints:
+        - 1 page max
+        - Strong alignment with role
+        - Concrete achievements
+        - Truthful; do not add fictitious experience
+        Output ONLY the final letter.
         """
-        improved = llm.invoke([
-            HumanMessage(content=prompt +
-                                 "\n\nJOB:\n" + state["job_description"] +
-                                 "\n\nCV:\n" + state["cv_text"] +
-                                 "\n\nCURRENT LETTER:\n" + state["cover_letter_draft"] +
-                                 "\n\nFEEDBACK:\n" + state["cover_letter_feedback"])
+        improved = revise_llm.invoke([
+            HumanMessage(
+                content=revise_prompt
+                + "\n\nJOB:\n" + jd
+                + "\n\nCV:\n" + cv
+                + "\n\nCURRENT LETTER:\n" + cl
+                + "\n\nFEEDBACK:\n" + fb
+            )
         ]).content
+
         state["cover_letter_draft"] = improved
         state["iteration"] += 1
         return state
 
+    # 3) Reviewer for CV using stronger model
     def reflect_cv(state: AppState) -> AppState:
-        """Critic/reflector for CV."""
+        jd = state["job_description"]
+        cv = state["cv_draft"]
+
         review_prompt = """
-        Review the CV against the job description.
-        Suggest:
-        - Role reordering to emphasize relevance
-        - Bullet improvements with metrics
-        - Skills alignment
-        - Anything that may be misleading: flag it to keep truthful.
-        Reply with clear bullet points.
+        You are optimizing a CV for this job.
+        Provide bullet-point suggestions on:
+        - Which roles/bullets to move up or down
+        - Where to add or sharpen metrics
+        - Where to trim irrelevant content
+        - Skills section alignment
+        Do NOT suggest anything untruthful.
         """
-        fb = llm.invoke([
-            HumanMessage(content=review_prompt +
-                                 "\n\nJOB:\n" + state["job_description"] +
-                                 "\n\nCV (current):\n" + state["cv_draft"])
+        fb = revise_llm.invoke([
+            HumanMessage(
+                content=review_prompt
+                + "\n\nJOB:\n" + jd
+                + "\n\nCV:\n" + cv
+            )
         ]).content
+
         state["cv_feedback"] = fb
         return state
 
     def revise_cv(state: AppState) -> AppState:
-        """Apply CV feedback."""
-        prompt = """
-        Rewrite the CV text applying the feedback.
-        Preserve factual accuracy. Output full CV text only.
+        jd = state["job_description"]
+        cv = state["cv_draft"]
+        fb = state["cv_feedback"]
+
+        revise_prompt = """
+        Rewrite the CV applying the feedback.
+        Keep all experience truthful.
+        Emphasize achievements, impact, and relevance to the job.
+        Output ONLY the full CV text.
         """
-        new_cv = llm.invoke([
-            HumanMessage(content=prompt +
-                                 "\n\nJOB:\n" + state["job_description"] +
-                                 "\n\nCURRENT CV:\n" + state["cv_draft"] +
-                                 "\n\nFEEDBACK:\n" + state["cv_feedback"])
+        new_cv = revise_llm.invoke([
+            HumanMessage(
+                content=revise_prompt
+                + "\n\nJOB:\n" + jd
+                + "\n\nCURRENT CV:\n" + cv
+                + "\n\nFEEDBACK:\n" + fb
+            )
         ]).content
+
         state["cv_draft"] = new_cv
         return state
 
+    # 4) Simple stopping rule
     def decide_next(state: AppState) -> str:
-        """
-        Simple stopping rule:
-        - run 2 refinement iterations, then finalize.
-        You can instead parse scores from feedback.
-        """
         if state["iteration"] >= 2:
             state["cover_letter_final"] = state["cover_letter_draft"]
             state["cv_final"] = state["cv_draft"]
             return END
-        return "reflect_cover_letter"  # loop again through CL + CV improvements
+        return "reflect_cover_letter"
 
+    # Fast drafter
+    draft_llm = ChatOllama(
+        model="phi3.5",
+        temperature=0.7,
+    )
 
-    llm = ChatOllama(model="phi3",
-                     temperature=0.7)
+    # Stronger reviser
+    revise_llm = ChatOllama(
+        model="qwen2.5:7b-instruct-q4_0",
+        temperature=0.1,
+    )
 
     graph = StateGraph(AppState)
     graph.add_node("init", init_cv_and_cl)
@@ -162,4 +211,4 @@ def build_agent():
 
     return app
 
-APP = build_agent()
+AGENT = build_agent()
