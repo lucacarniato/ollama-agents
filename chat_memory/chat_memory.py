@@ -28,7 +28,7 @@ if __name__ == "__main__":
     # Initialize ChatOllama
     llm = ChatOllama(
         model="mistral",
-        base_url="http://localhost:11434/",  # adjust if needed
+        base_url="http://localhost:11434/",
         temperature=0.2
     )
 
